@@ -3,165 +3,178 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ATLAS Routine Maker - AI Study Planner</title>
-    <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <title>ATLAS Routine Maker</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-    <div class="app-container">
+    <!-- Splash Screen -->
+    <div id="splash">
+        <div class="particles"></div>
+        <h1 class="splash-title">✦ ATLAS Routine Maker ✦</h1>
+        <p class="splash-subtitle">আপনার প্রস্তুতির বিশ্বস্ত সঙ্গী</p>
+    </div>
+
+    <!-- Main App -->
+    <div id="app" style="display:none;">
         <!-- Header -->
-        <header class="header">
-            <div class="logo">
-                <div class="logo-icon">📚</div>
-                <h1>ATLAS Routine Maker</h1>
+        <header id="header">
+            <div class="header-left">
+                <h1 class="logo">✦ ATLAS Routine Maker ✦</h1>
+                <p class="tagline">আপনার প্রস্তুতির বিশ্বস্ত সঙ্গী</p>
             </div>
-            <p class="tagline">AI-Powered Smart Study Planner</p>
+            <button id="themeToggle" class="theme-btn">☀️</button>
         </header>
 
-        <!-- Main Content -->
-        <main class="main-content" id="inputSection">
-            <div class="container">
-                <!-- Study Mode Selection -->
-                <div class="card">
-                    <h2 class="section-title">📊 Routine Intensity</h2>
-                    <div class="mode-selector">
-                        <button class="mode-btn active" data-mode="relaxed">
-                            <span class="mode-icon">😌</span>
-                            <span class="mode-name">Relaxed</span>
-                            <span class="mode-desc">কম চাপ</span>
-                        </button>
-                        <button class="mode-btn" data-mode="balanced">
-                            <span class="mode-icon">⚖️</span>
-                            <span class="mode-name">Balanced</span>
-                            <span class="mode-desc">মাঝারি চাপ</span>
-                        </button>
-                        <button class="mode-btn" data-mode="extreme">
-                            <span class="mode-icon">🔥</span>
-                            <span class="mode-name">Extreme</span>
-                            <span class="mode-desc">দ্রুত Finish</span>
-                        </button>
-                    </div>
+        <!-- Home Page -->
+        <div id="homePage" class="page active">
+            <div class="cards-container">
+                <div class="plan-card active" id="bigPlanCard">
+                    <div class="card-icon">📅</div>
+                    <h2>রুটিন বানাও [Big Plan]</h2>
+                    <p>সম্পূর্ণ সিলেবাস গুছিয়ে শেষ করুন | AI-Powered Planning</p>
+                    <button class="btn-primary" id="startBigPlan">▶ শুরু করুন</button>
                 </div>
-
-                <!-- Study Input Section -->
-                <div class="card">
-                    <h2 class="section-title">📖 Your Study Materials</h2>
-                    <div id="subjectsContainer"></div>
-                    <button class="add-btn" onclick="addSubject()">
-                        <span>+</span> Add Subject
-                    </button>
+                <div class="plan-card locked">
+                    <div class="card-icon">📝</div>
+                    <h2>রুটিন বানাও [Daily Plan]</h2>
+                    <p>কমিং সুন...</p>
+                    <button class="btn-disabled" disabled>🔒 শীঘ্রই আসছে</button>
                 </div>
-
-                <!-- Personal Instructions -->
-                <div class="card">
-                    <h2 class="section-title">✍️ Personal Instructions</h2>
-                    <textarea 
-                        id="personalInstructions" 
-                        class="personal-textarea"
-                        placeholder="আপনার ব্যক্তিগত টার্গেট বা বিশেষ নির্দেশনা লিখুন...&#10;উদাহরণ: প্রতিদিন সকালে গণিত পড়তে চাই, শুক্রবার হালকা রাখতে চাই"></textarea>
-                </div>
-
-                <!-- Date & Time Selection -->
-                <div class="card">
-                    <h2 class="section-title">📅 Study Period</h2>
-                    <div class="date-grid">
-                        <div class="date-input-group">
-                            <label>Start Date & Time</label>
-                            <input type="datetime-local" id="startDate" class="date-input">
-                        </div>
-                        <div class="date-input-group">
-                            <label>End Date & Time</label>
-                            <input type="datetime-local" id="endDate" class="date-input">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Study Hours -->
-                <div class="card">
-                    <h2 class="section-title">⏰ Daily Study Hours</h2>
-                    <div class="hours-selector">
-                        <button class="hour-btn" data-hours="2">2 ঘন্টা</button>
-                        <button class="hour-btn active" data-hours="4">4 ঘন্টা</button>
-                        <button class="hour-btn" data-hours="6">6 ঘন্টা</button>
-                        <button class="hour-btn" data-hours="8">8 ঘন্টা</button>
-                    </div>
-                </div>
-
-                <!-- Revision Gap -->
-                <div class="card">
-                    <h2 class="section-title">🔄 Weekly Revision Days</h2>
-                    <div class="revision-selector">
-                        <button class="revision-btn active" data-days="1">1 দিন</button>
-                        <button class="revision-btn" data-days="2">2 দিন</button>
-                        <button class="revision-btn" data-days="3">3 দিন</button>
-                    </div>
-                </div>
-
-                <!-- Generate Button -->
-                <button class="generate-btn" onclick="generateRoutine()">
-                    <span class="btn-icon">🚀</span>
-                    <span class="btn-text">Plan Done - Generate Routine</span>
-                </button>
             </div>
-        </main>
 
-        <!-- Generated Routine Section -->
-        <div class="routine-section hidden" id="routineSection">
-            <div class="container">
-                <div class="routine-header">
-                    <div class="routine-title-area">
-                        <h1 class="routine-main-title">ATLAS Routine Maker</h1>
-                        <p class="routine-subtitle" id="routineSubtitle"></p>
-                    </div>
-                    <div class="routine-actions">
-                        <button class="action-btn" onclick="rearrangePlan()">
-                            <span>🔄</span> Re-arrange Plan
-                        </button>
-                        <button class="action-btn" onclick="backToInput()">
-                            <span>◀</span> Back to Input
-                        </button>
+            <div id="savedRoutines" class="saved-routines"></div>
+        </div>
+
+        <!-- Creator Page -->
+        <div id="creatorPage" class="page">
+            <div class="creator-container">
+                <button class="btn-back" onclick="backToHome()">← ফিরে যান</button>
+                
+                <div class="step-indicator">
+                    <span class="step active" data-step="1">১</span>
+                    <span class="step" data-step="2">২</span>
+                    <span class="step" data-step="3">৩</span>
+                    <span class="step" data-step="4">৪</span>
+                    <span class="step" data-step="5">৫</span>
+                </div>
+
+                <div id="step1" class="step-content active">
+                    <h2>রুটিনের নাম দিন</h2>
+                    <input type="text" id="routineName" placeholder="উদাহরণ: HSC 2026 Preparation">
+                    <button class="btn-primary" onclick="nextStep(2)">পরবর্তী</button>
+                </div>
+
+                <div id="step2" class="step-content">
+                    <h2>সাবজেক্ট, চ্যাপ্টার ও টপিক যোগ করুন</h2>
+                    <div id="subjectsContainer"></div>
+                    <button class="btn-add" onclick="addSubject()">+ সাবজেক্ট যোগ করুন</button>
+                    <div style="margin-top:20px; display:flex; gap:10px;">
+                        <button class="btn-secondary" onclick="nextStep(1)">পূর্ববর্তী</button>
+                        <button class="btn-primary" onclick="nextStep(3)">পরবর্তী</button>
                     </div>
                 </div>
 
-                <!-- Progress Overview -->
-                <div class="progress-card">
-                    <div class="progress-info">
-                        <h3>Overall Progress</h3>
-                        <div class="progress-stats">
-                            <span class="stat-item">
-                                <span class="stat-label">Completed:</span>
-                                <span class="stat-value" id="completedTasks">0</span>
-                            </span>
-                            <span class="stat-item">
-                                <span class="stat-label">Total:</span>
-                                <span class="stat-value" id="totalTasks">0</span>
-                            </span>
-                            <span class="stat-item">
-                                <span class="stat-label">Percentage:</span>
-                                <span class="stat-value" id="percentageComplete">0%</span>
-                            </span>
+                <div id="step3" class="step-content">
+                    <h2>ব্যক্তিগত টার্গেট (ঐচ্ছিক)</h2>
+                    <textarea id="personalTarget" rows="4" placeholder="আপনার লক্ষ্য লিখুন..."></textarea>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-secondary" onclick="nextStep(2)">পূর্ববর্তী</button>
+                        <button class="btn-primary" onclick="nextStep(4)">পরবর্তী</button>
+                    </div>
+                </div>
+
+                <div id="step4" class="step-content">
+                    <h2>সময়সীমা নির্ধারণ করুন</h2>
+                    <div class="date-inputs">
+                        <div>
+                            <label>শুরুর তারিখ</label>
+                            <input type="date" id="startDate">
+                            <input type="time" id="startTime" value="06:00">
+                        </div>
+                        <div>
+                            <label>শেষের তারিখ</label>
+                            <input type="date" id="endDate">
+                            <input type="time" id="endTime" value="23:00">
                         </div>
                     </div>
-                    <div class="progress-bar-container">
-                        <div class="progress-bar" id="progressBar"></div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-secondary" onclick="nextStep(3)">পূর্ববর্তী</button>
+                        <button class="btn-primary" onclick="nextStep(5)">পরবর্তী</button>
                     </div>
                 </div>
 
-                <!-- Routine Timeline -->
-                <div id="routineTimeline"></div>
+                <div id="step5" class="step-content">
+                    <h2>রিভিশন গ্যাপ নির্বাচন করুন</h2>
+                    <select id="revisionGap">
+                        <option value="7">১ দিন সাপ্তাহিক</option>
+                        <option value="3">২ দিন সাপ্তাহিক</option>
+                        <option value="2">৩ দিন সাপ্তাহিক</option>
+                    </select>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-secondary" onclick="nextStep(4)">পূর্ববর্তী</button>
+                        <button class="btn-primary btn-final" onclick="generateRoutine()">✨ Plan Done - রুটিন তৈরি করুন</button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Loading Overlay -->
-        <div class="loading-overlay hidden" id="loadingOverlay">
-            <div class="loading-content">
-                <div class="loader"></div>
-                <p class="loading-text">AI is analyzing your study plan...</p>
-                <p class="loading-subtext">Creating the perfect routine for you</p>
+        <!-- View Page -->
+        <div id="viewPage" class="page">
+            <div class="view-header no-print">
+                <div class="header-top">
+                    <h1 id="viewRoutineName"></h1>
+                    <p id="viewDateRange"></p>
+                </div>
+                
+                <div class="progress-section">
+                    <div class="progress-bar-wrapper">
+                        <label>চ্যাপ্টার সম্পন্ন:</label>
+                        <div class="progress"><div id="chapterProgress"></div></div>
+                        <span id="chapterPercent">0%</span>
+                    </div>
+                    <div class="progress-bar-wrapper">
+                        <label>টপিক সম্পন্ন:</label>
+                        <div class="progress"><div id="topicProgress"></div></div>
+                        <span id="topicPercent">0%</span>
+                    </div>
+                </div>
+                
+                <div class="action-buttons">
+                    <button class="btn-action" onclick="downloadPDF()">📥 PDF Download</button>
+                    <button class="btn-action" onclick="remakeRoutine()">🔄 Re-make Routine</button>
+                    <button class="btn-action" onclick="editRoutine()">✏️ Edit</button>
+                    <button class="btn-action" onclick="backToHome()">← ফিরে যান</button>
+                </div>
+            </div>
+
+            <!-- PDF Header (Hidden, only shows in print) -->
+            <div class="pdf-header">
+                <h1>ATLAS Routine Maker</h1>
+                <h2 id="pdfRoutineName"></h2>
+                <p id="pdfDateRange"></p>
+                <div class="pdf-progress">
+                    <p>চ্যাপ্টার সম্পন্ন: <span id="pdfChapterPercent"></span></p>
+                    <p>টপিক সম্পন্ন: <span id="pdfTopicPercent"></span></p>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table id="routineTable">
+                    <thead>
+                        <tr>
+                            <th>📅 তারিখ</th>
+                            <th>📘 সাবজেক্ট</th>
+                            <th>📖 চ্যাপ্টার</th>
+                            <th>📄 টপিক</th>
+                        </tr>
+                    </thead>
+                    <tbody id="routineTableBody"></tbody>
+                </table>
             </div>
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
