@@ -11,7 +11,7 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // GLOBAL STATE
 // ══════════════════════════════════════
 let G = {
-    userId:       null, // Will be set after auth check
+    userId:       null,
     routineId:    null,
     subCount:     0,
     chapCount:    0,
@@ -31,10 +31,8 @@ const DIFF_MULT = { easy:0.7, medium:1.0, hard:1.4 };
 // INIT
 // ══════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
-    // Typewriter splash
     typewriter('splashSub', 'আপনার প্রস্তুতির বিশ্বস্ত সঙ্গী', 60);
 
-    // Initialize user (create if doesn't exist)
     await initUser();
 
     setTimeout(() => {
@@ -61,15 +59,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ══════════════════════════════════════
-// USER MANAGEMENT (No Auth - Simple UUID)
+// USER MANAGEMENT
 // ══════════════════════════════════════
 async function initUser() {
-    // Since RLS is disabled, we'll use a simple anonymous user system
-    // Check if user exists in localStorage
     let storedUserId = localStorage.getItem('atlas_user_uuid');
     
     if (storedUserId) {
-        // Verify it's a valid UUID format
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         if (uuidRegex.test(storedUserId)) {
             G.userId = storedUserId;
@@ -77,7 +72,6 @@ async function initUser() {
         }
     }
     
-    // Generate a new UUID v4
     G.userId = generateUUID();
     localStorage.setItem('atlas_user_uuid', G.userId);
 }
@@ -92,6 +86,7 @@ function generateUUID() {
 
 function typewriter(elId, text, speed) {
     const el = document.getElementById(elId);
+    if (!el) return;
     let i = 0;
     el.textContent = '';
     const iv = setInterval(() => {
@@ -384,9 +379,14 @@ async function generateRoutine() {
             }).select().single();
             
             if (error) {
-                console.error('Insert error:', error);
+                console.error('Insert routine error:', error);
                 throw error;
             }
+            
+            if (!data || !data.id) {
+                throw new Error('Routine created but no ID returned');
+            }
+            
             routineId = data.id;
         }
 
@@ -394,16 +394,26 @@ async function generateRoutine() {
 
         // Insert subjects → chapters → topics
         for (const subj of subjects) {
-            const { data: sd } = await db.from('subjects').insert({
+            const { data: sd, error: subjErr } = await db.from('subjects').insert({
                 routine_id: routineId, name: subj.name, sort_order: subj.sortOrder
             }).select().single();
 
+            if (subjErr || !sd || !sd.id) {
+                console.error('Subject insert error:', subjErr);
+                continue;
+            }
+
             for (const chap of subj.chapters) {
-                const { data: cd } = await db.from('chapters').insert({
+                const { data: cd, error: chapErr } = await db.from('chapters').insert({
                     routine_id: routineId, subject_id: sd.id,
                     name: chap.name, time_level: chap.timeLevel,
                     difficulty: chap.difficulty, is_done: false, sort_order: chap.sortOrder
                 }).select().single();
+
+                if (chapErr || !cd || !cd.id) {
+                    console.error('Chapter insert error:', chapErr);
+                    continue;
+                }
 
                 for (const t of chap.topics) {
                     await db.from('topics').insert({
@@ -457,6 +467,7 @@ async function generateRoutine() {
 
         hideLoader();
         G.editMode = false; G.editData = null;
+        alert('✅ রুটিন সফলভাবে তৈরি হয়েছে!');
         await openView(routineId);
 
     } catch (err) {
@@ -602,33 +613,44 @@ async function openView(id) {
     showLoader('লোড হচ্ছে...');
     G.routineId = id;
 
-    const { data: r } = await db.from('routines').select('*').eq('id', id).single();
-    const { data: items } = await db.from('routine_items').select('*')
-        .eq('routine_id', id).order('sort_order');
+    try {
+        const { data: r, error: rErr } = await db.from('routines').select('*').eq('id', id).single();
+        if (rErr || !r) {
+            throw new Error('Routine not found');
+        }
 
-    G.currentRoutine = r;
+        const { data: items } = await db.from('routine_items').select('*')
+            .eq('routine_id', id).order('sort_order');
 
-    document.getElementById('viewRoutineName').textContent = r.name;
-    document.getElementById('viewDateRange').textContent   = `📅 ${fmtDate(r.start_date)} → ${fmtDate(r.end_date)} | মোট ${r.total_days} দিন`;
+        G.currentRoutine = r;
 
-    const dl = Math.ceil((new Date(r.end_date) - new Date()) / 86400000);
-    const dlEl = document.getElementById('viewDaysLeft');
-    dlEl.textContent = dl > 0 ? `⏳ ${dl} দিন বাকি` : '⛔ সময় শেষ';
-    dlEl.style.color = dl > 7 ? 'var(--gold)' : dl > 0 ? '#ff9600' : '#ff3c3c';
+        document.getElementById('viewRoutineName').textContent = r.name;
+        document.getElementById('viewDateRange').textContent   = `📅 ${fmtDate(r.start_date)} → ${fmtDate(r.end_date)} | মোট ${r.total_days} দিন`;
 
-    document.getElementById('viewTarget').textContent = r.personal_target
-        ? `🎯 ${r.personal_target}` : '';
+        const dl = Math.ceil((new Date(r.end_date) - new Date()) / 86400000);
+        const dlEl = document.getElementById('viewDaysLeft');
+        dlEl.textContent = dl > 0 ? `⏳ ${dl} দিন বাকি` : '⛔ সময় শেষ';
+        dlEl.style.color = dl > 7 ? 'var(--gold)' : dl > 0 ? '#ff9600' : '#ff3c3c';
 
-    document.getElementById('pdfTitle').textContent  = r.name;
-    document.getElementById('pdfDate').textContent   = `তারিখ: ${fmtDate(r.start_date)} → ${fmtDate(r.end_date)}`;
-    document.getElementById('pdfTarget').textContent = r.personal_target ? `লক্ষ্য: ${r.personal_target}` : '';
-    document.getElementById('pdfStats').textContent  = `মোট চ্যাপ্টার: ${r.total_chapters} | মোট টপিক: ${r.total_topics} | মোট দিন: ${r.total_days}`;
+        document.getElementById('viewTarget').textContent = r.personal_target
+            ? `🎯 ${r.personal_target}` : '';
 
-    refreshProgress(r);
-    renderTable(items, r);
+        document.getElementById('pdfTitle').textContent  = r.name;
+        document.getElementById('pdfDate').textContent   = `তারিখ: ${fmtDate(r.start_date)} → ${fmtDate(r.end_date)}`;
+        document.getElementById('pdfTarget').textContent = r.personal_target ? `লক্ষ্য: ${r.personal_target}` : '';
+        document.getElementById('pdfStats').textContent  = `মোট চ্যাপ্টার: ${r.total_chapters} | মোট টপিক: ${r.total_topics} | মোট দিন: ${r.total_days}`;
 
-    hideLoader();
-    showPage('viewPage');
+        refreshProgress(r);
+        renderTable(items || [], r);
+
+        hideLoader();
+        showPage('viewPage');
+    } catch (err) {
+        hideLoader();
+        console.error('View error:', err);
+        alert('রুটিন লোড করতে সমস্যা হয়েছে');
+        showPage('homePage');
+    }
 }
 
 function renderTable(items, r) {
@@ -689,105 +711,117 @@ function refreshProgress(r) {
 // CHECKBOX LOGIC
 // ══════════════════════════════════════
 async function onTopicCb(itemId, chapName, isDone) {
-    await db.from('routine_items').update({ topic_done: isDone }).eq('id', itemId);
+    try {
+        await db.from('routine_items').update({ topic_done: isDone }).eq('id', itemId);
 
-    const { data: item } = await db.from('routine_items').select('topic_name').eq('id', itemId).single();
-    if (item?.topic_name && item.topic_name !== '❌') {
-        await db.from('topics')
-            .update({ is_done: isDone })
+        const { data: item } = await db.from('routine_items').select('topic_name').eq('id', itemId).single();
+        if (item?.topic_name && item.topic_name !== '❌') {
+            await db.from('topics')
+                .update({ is_done: isDone })
+                .eq('routine_id', G.routineId)
+                .eq('name', item.topic_name);
+        }
+
+        const { data: chapItems } = await db.from('routine_items')
+            .select('topic_done, is_revision')
             .eq('routine_id', G.routineId)
-            .eq('name', item.topic_name);
-    }
+            .eq('chapter_name', chapName)
+            .eq('is_revision', false);
 
-    const { data: chapItems } = await db.from('routine_items')
-        .select('topic_done, is_revision')
-        .eq('routine_id', G.routineId)
-        .eq('chapter_name', chapName)
-        .eq('is_revision', false);
+        const validItems = chapItems?.filter(ci => ci.topic_done !== null) || [];
+        const allDone = validItems.length > 0 && validItems.every(ci => ci.topic_done);
 
-    const validItems = chapItems?.filter(ci => ci.topic_done !== null) || [];
-    const allDone = validItems.length > 0 && validItems.every(ci => ci.topic_done);
-
-    if (allDone) {
-        await db.from('routine_items')
-            .update({ chapter_done: true })
-            .eq('routine_id', G.routineId)
-            .eq('chapter_name', chapName);
-        await db.from('chapters')
-            .update({ is_done: true })
-            .eq('routine_id', G.routineId)
-            .eq('name', chapName);
-    } else {
-        if (!isDone) {
+        if (allDone) {
             await db.from('routine_items')
-                .update({ chapter_done: false })
+                .update({ chapter_done: true })
                 .eq('routine_id', G.routineId)
                 .eq('chapter_name', chapName);
             await db.from('chapters')
-                .update({ is_done: false })
+                .update({ is_done: true })
                 .eq('routine_id', G.routineId)
                 .eq('name', chapName);
+        } else {
+            if (!isDone) {
+                await db.from('routine_items')
+                    .update({ chapter_done: false })
+                    .eq('routine_id', G.routineId)
+                    .eq('chapter_name', chapName);
+                await db.from('chapters')
+                    .update({ is_done: false })
+                    .eq('routine_id', G.routineId)
+                    .eq('name', chapName);
+            }
         }
-    }
 
-    await syncProgressToDB();
-    await openView(G.routineId);
+        await syncProgressToDB();
+        await openView(G.routineId);
+    } catch (err) {
+        console.error('Topic checkbox error:', err);
+    }
 }
 
 async function onChapterCb(itemId, chapName, isDone) {
-    await db.from('routine_items')
-        .update({ chapter_done: isDone, topic_done: isDone })
-        .eq('routine_id', G.routineId)
-        .eq('chapter_name', chapName);
+    try {
+        await db.from('routine_items')
+            .update({ chapter_done: isDone, topic_done: isDone })
+            .eq('routine_id', G.routineId)
+            .eq('chapter_name', chapName);
 
-    await db.from('chapters')
-        .update({ is_done: isDone })
-        .eq('routine_id', G.routineId)
-        .eq('name', chapName);
+        await db.from('chapters')
+            .update({ is_done: isDone })
+            .eq('routine_id', G.routineId)
+            .eq('name', chapName);
 
-    const { data: chData } = await db.from('chapters')
-        .select('id')
-        .eq('routine_id', G.routineId)
-        .eq('name', chapName);
+        const { data: chData } = await db.from('chapters')
+            .select('id')
+            .eq('routine_id', G.routineId)
+            .eq('name', chapName);
 
-    if (chData?.length) {
-        for (const ch of chData) {
-            await db.from('topics').update({ is_done: isDone }).eq('chapter_id', ch.id);
+        if (chData?.length) {
+            for (const ch of chData) {
+                await db.from('topics').update({ is_done: isDone }).eq('chapter_id', ch.id);
+            }
         }
-    }
 
-    await syncProgressToDB();
-    await openView(G.routineId);
+        await syncProgressToDB();
+        await openView(G.routineId);
+    } catch (err) {
+        console.error('Chapter checkbox error:', err);
+    }
 }
 
 async function syncProgressToDB() {
-    const { data: items } = await db.from('routine_items')
-        .select('chapter_name, topic_name, chapter_done, topic_done')
-        .eq('routine_id', G.routineId)
-        .eq('is_revision', false);
+    try {
+        const { data: items } = await db.from('routine_items')
+            .select('chapter_name, topic_name, chapter_done, topic_done')
+            .eq('routine_id', G.routineId)
+            .eq('is_revision', false);
 
-    const chapMap = {};
-    items?.forEach(i => {
-        if (!i.chapter_name || i.chapter_name === '❌') return;
-        if (!chapMap[i.chapter_name]) chapMap[i.chapter_name] = { total: 0, done: 0 };
-        chapMap[i.chapter_name].total++;
-        if (i.chapter_done) chapMap[i.chapter_name].done++;
-    });
-    const chaptersDone = Object.values(chapMap).filter(v => v.total > 0 && v.done === v.total).length;
+        const chapMap = {};
+        items?.forEach(i => {
+            if (!i.chapter_name || i.chapter_name === '❌') return;
+            if (!chapMap[i.chapter_name]) chapMap[i.chapter_name] = { total: 0, done: 0 };
+            chapMap[i.chapter_name].total++;
+            if (i.chapter_done) chapMap[i.chapter_name].done++;
+        });
+        const chaptersDone = Object.values(chapMap).filter(v => v.total > 0 && v.done === v.total).length;
 
-    const validTopics = items?.filter(i => i.topic_name && i.topic_name !== '❌') || [];
-    const topicsDone  = validTopics.filter(i => i.topic_done).length;
+        const validTopics = items?.filter(i => i.topic_name && i.topic_name !== '❌') || [];
+        const topicsDone  = validTopics.filter(i => i.topic_done).length;
 
-    await db.from('routines').update({
-        chapters_done: chaptersDone,
-        topics_done:   topicsDone,
-        updated_at:    new Date().toISOString()
-    }).eq('id', G.routineId);
+        await db.from('routines').update({
+            chapters_done: chaptersDone,
+            topics_done:   topicsDone,
+            updated_at:    new Date().toISOString()
+        }).eq('id', G.routineId);
 
-    if (G.currentRoutine) {
-        G.currentRoutine.chapters_done = chaptersDone;
-        G.currentRoutine.topics_done   = topicsDone;
-        refreshProgress(G.currentRoutine);
+        if (G.currentRoutine) {
+            G.currentRoutine.chapters_done = chaptersDone;
+            G.currentRoutine.topics_done   = topicsDone;
+            refreshProgress(G.currentRoutine);
+        }
+    } catch (err) {
+        console.error('Sync progress error:', err);
     }
 }
 
@@ -893,53 +927,70 @@ async function startEdit(id) {
 async function editRoutine() {
     showLoader('লোড হচ্ছে...');
 
-    const { data: r } = await db.from('routines').select('*').eq('id', G.routineId).single();
-    const { data: subjects } = await db.from('subjects').select('*').eq('routine_id', G.routineId).order('sort_order');
+    try {
+        const { data: r, error: rErr } = await db.from('routines').select('*').eq('id', G.routineId).single();
+        if (rErr || !r) {
+            throw new Error('Routine not found');
+        }
 
-    G.editMode = true;
-    G.editData = r;
+        const { data: subjects } = await db.from('subjects').select('*').eq('routine_id', G.routineId).order('sort_order');
 
-    resetCreator();
+        G.editMode = true;
+        G.editData = r;
 
-    document.getElementById('routineName').value = r.name;
-    document.getElementById('personalTarget').value = r.personal_target || '';
-    document.getElementById('startDate').value = r.start_date?.split('T')[0] || '';
-    document.getElementById('endDate').value   = r.end_date?.split('T')[0]   || '';
-    document.getElementById('startTime').value = r.start_time || '06:00';
-    document.getElementById('endTime').value   = r.end_time   || '23:00';
-    const revRadio = document.querySelector(`input[name="revGap"][value="${r.revision_gap}"]`);
-    if (revRadio) revRadio.checked = true;
+        resetCreator();
 
-    calcDays();
+        document.getElementById('routineName').value = r.name;
+        document.getElementById('personalTarget').value = r.personal_target || '';
+        document.getElementById('startDate').value = r.start_date?.split('T')[0] || '';
+        document.getElementById('endDate').value   = r.end_date?.split('T')[0]   || '';
+        document.getElementById('startTime').value = r.start_time || '06:00';
+        document.getElementById('endTime').value   = r.end_time   || '23:00';
+        const revRadio = document.querySelector(`input[name="revGap"][value="${r.revision_gap}"]`);
+        if (revRadio) revRadio.checked = true;
 
-    for (const subj of subjects) {
-        G.subCount++;
-        const sid = G.subCount;
-        const sdiv = document.createElement('div');
-        sdiv.className = 'subject-card';
-        sdiv.id = `sub${sid}`;
-        sdiv.innerHTML = `
-          <div class="subject-header">
-            <input class="subj-name" placeholder="সাবজেক্টের নাম" type="text" value="${subj.name}">
-            <button class="btn-sm" onclick="rmSub(${sid})">×</button>
-          </div>
-          <div id="chaps${sid}"></div>
-          <button class="btn-add" onclick="addChapter(${sid})">+ চ্যাপ্টার যোগ করুন</button>`;
-        document.getElementById('subjectsContainer').appendChild(sdiv);
+        calcDays();
 
-        const { data: chapters } = await db.from('chapters').select('*').eq('subject_id', subj.id).order('sort_order');
-        for (const chap of chapters) {
-            const cid = addChapter(sid, { name: chap.name, timeLevel: chap.time_level, difficulty: chap.difficulty });
-            const { data: topics } = await db.from('topics').select('*').eq('chapter_id', chap.id).order('sort_order');
-            for (const tp of topics) {
-                if (tp.name !== '❌') addTopic(cid, tp.name);
+        if (subjects && subjects.length > 0) {
+            for (const subj of subjects) {
+                G.subCount++;
+                const sid = G.subCount;
+                const sdiv = document.createElement('div');
+                sdiv.className = 'subject-card';
+                sdiv.id = `sub${sid}`;
+                sdiv.innerHTML = `
+                  <div class="subject-header">
+                    <input class="subj-name" placeholder="সাবজেক্টের নাম" type="text" value="${subj.name}">
+                    <button class="btn-sm" onclick="rmSub(${sid})">×</button>
+                  </div>
+                  <div id="chaps${sid}"></div>
+                  <button class="btn-add" onclick="addChapter(${sid})">+ চ্যাপ্টার যোগ করুন</button>`;
+                document.getElementById('subjectsContainer').appendChild(sdiv);
+
+                const { data: chapters } = await db.from('chapters').select('*').eq('subject_id', subj.id).order('sort_order');
+                if (chapters && chapters.length > 0) {
+                    for (const chap of chapters) {
+                        const cid = addChapter(sid, { name: chap.name, timeLevel: chap.time_level, difficulty: chap.difficulty });
+                        const { data: topics } = await db.from('topics').select('*').eq('chapter_id', chap.id).order('sort_order');
+                        if (topics && topics.length > 0) {
+                            for (const tp of topics) {
+                                if (tp.name !== '❌') addTopic(cid, tp.name);
+                            }
+                        }
+                    }
+                }
             }
         }
-    }
 
-    hideLoader();
-    showPage('creatorPage');
-    nextStep(1);
+        hideLoader();
+        showPage('creatorPage');
+        nextStep(1);
+    } catch (err) {
+        hideLoader();
+        console.error('Edit error:', err);
+        alert('রুটিন এডিট করতে সমস্যা হয়েছে');
+        showPage('homePage');
+    }
 }
 
 // ══════════════════════════════════════
@@ -949,17 +1000,26 @@ async function deleteRoutine(id) {
     if (!confirm('রুটিন স্থায়ীভাবে মুছে ফেলবেন?')) return;
     showLoader('মুছে ফেলা হচ্ছে...');
 
-    const { data: r } = await db.from('routines').select('*').eq('id', id).single();
-    await saveHistory(id, 'delete', r?.total_topics||0, 0, 0, `"${r?.name}" deleted`);
+    try {
+        const { data: r } = await db.from('routines').select('*').eq('id', id).single();
+        if (r) {
+            await saveHistory(id, 'delete', r.total_topics || 0, 0, 0, `"${r.name}" deleted`);
+        }
 
-    await db.from('routine_items').delete().eq('routine_id', id);
-    await db.from('topics').delete().eq('routine_id', id);
-    await db.from('chapters').delete().eq('routine_id', id);
-    await db.from('subjects').delete().eq('routine_id', id);
-    await db.from('routines').delete().eq('id', id);
+        await db.from('routine_items').delete().eq('routine_id', id);
+        await db.from('topics').delete().eq('routine_id', id);
+        await db.from('chapters').delete().eq('routine_id', id);
+        await db.from('subjects').delete().eq('routine_id', id);
+        await db.from('routines').delete().eq('id', id);
 
-    hideLoader();
-    await loadHome();
+        hideLoader();
+        alert('✅ রুটিন মুছে ফেলা হয়েছে');
+        await loadHome();
+    } catch (err) {
+        hideLoader();
+        console.error('Delete error:', err);
+        alert('মুছতে সমস্যা হয়েছে');
+    }
 }
 
 // ══════════════════════════════════════
@@ -979,20 +1039,24 @@ function downloadPDF() {
 // HISTORY
 // ══════════════════════════════════════
 async function saveHistory(routineId, action, topBefore, topAfter, pending, notes) {
-    const { data: hist } = await db.from('routine_history')
-        .select('version')
-        .eq('routine_id', routineId)
-        .order('version', { ascending: false })
-        .limit(1);
-    const version = (hist?.[0]?.version || 0) + 1;
+    try {
+        const { data: hist } = await db.from('routine_history')
+            .select('version')
+            .eq('routine_id', routineId)
+            .order('version', { ascending: false })
+            .limit(1);
+        const version = (hist?.[0]?.version || 0) + 1;
 
-    await db.from('routine_history').insert({
-        routine_id: routineId, version, action,
-        total_topics_before: topBefore,
-        total_topics_after:  topAfter,
-        pending_topics:      pending,
-        notes
-    });
+        await db.from('routine_history').insert({
+            routine_id: routineId, version, action,
+            total_topics_before: topBefore,
+            total_topics_after:  topAfter,
+            pending_topics:      pending,
+            notes
+        });
+    } catch (err) {
+        console.error('History save error:', err);
+    }
 }
 
 // ══════════════════════════════════════
@@ -1019,7 +1083,8 @@ function resetCreator() {
     document.getElementById('endTime').value        = '23:00';
     document.getElementById('subjectsContainer').innerHTML = '';
     document.getElementById('dayCalc').innerHTML    = '';
-    document.querySelector('input[name="revGap"][value="7"]').checked = true;
+    const revRadio = document.querySelector('input[name="revGap"][value="7"]');
+    if (revRadio) revRadio.checked = true;
 
     document.querySelectorAll('.step-content').forEach(s => s.classList.remove('active'));
     document.getElementById('step1').classList.add('active');
