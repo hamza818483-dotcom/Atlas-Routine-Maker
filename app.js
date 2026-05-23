@@ -11,11 +11,7 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // GLOBAL STATE
 // ══════════════════════════════════════
 let G = {
-    userId:       localStorage.getItem('atlas_uid') || (() => {
-                      const id = 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2,9);
-                      localStorage.setItem('atlas_uid', id);
-                      return id;
-                  })(),
+    userId:       null, // Will be set after auth check
     routineId:    null,
     subCount:     0,
     chapCount:    0,
@@ -34,9 +30,12 @@ const DIFF_MULT = { easy:0.7, medium:1.0, hard:1.4 };
 // ══════════════════════════════════════
 // INIT
 // ══════════════════════════════════════
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // Typewriter splash
     typewriter('splashSub', 'আপনার প্রস্তুতির বিশ্বস্ত সঙ্গী', 60);
+
+    // Initialize user (create if doesn't exist)
+    await initUser();
 
     setTimeout(() => {
         document.getElementById('splash').style.display = 'none';
@@ -60,6 +59,36 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('startDate').addEventListener('change', calcDays);
     document.getElementById('endDate').addEventListener('change', calcDays);
 });
+
+// ══════════════════════════════════════
+// USER MANAGEMENT (No Auth - Simple UUID)
+// ══════════════════════════════════════
+async function initUser() {
+    // Since RLS is disabled, we'll use a simple anonymous user system
+    // Check if user exists in localStorage
+    let storedUserId = localStorage.getItem('atlas_user_uuid');
+    
+    if (storedUserId) {
+        // Verify it's a valid UUID format
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(storedUserId)) {
+            G.userId = storedUserId;
+            return;
+        }
+    }
+    
+    // Generate a new UUID v4
+    G.userId = generateUUID();
+    localStorage.setItem('atlas_user_uuid', G.userId);
+}
+
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
 
 function typewriter(elId, text, speed) {
     const el = document.getElementById(elId);
@@ -235,7 +264,7 @@ function daysBetween(a, b) {
 // AI ROUTINE GENERATION
 // ══════════════════════════════════════
 async function generateRoutine() {
-    if (!validateStep(99)) return; // final check
+    if (!validateStep(99)) return;
 
     showLoader('রুটিন তৈরি হচ্ছে...');
 
@@ -252,15 +281,12 @@ async function generateRoutine() {
         const endDate   = new Date(endStr);
         const totalDays = daysBetween(startStr, endStr);
 
-        // Count revision days correctly:
-        // every Nth day (revGap) IS a revision day
-        // day 1 is never revision. day revGap, 2*revGap, 3*revGap... are revision days
         const revisionDays = Math.floor((totalDays - 1) / revGap);
         const studyDays    = totalDays - revisionDays;
 
         // ── Collect Syllabus ──
         const subjects   = [];
-        const chapGroups = []; // each group = one chapter's topics (to keep them together)
+        const chapGroups = [];
         let totalChaps   = 0;
         let totalTopics  = 0;
 
@@ -278,7 +304,6 @@ async function generateRoutine() {
 
                 const topics = rawTopics.length ? rawTopics : [{ name: '❌', sortOrder: 0 }];
 
-                // Effective time per topic
                 const base = BASE_TIME[level];
                 const mult = DIFF_MULT[diff];
                 const timePerTopic = (base * mult) / topics.length;
@@ -312,21 +337,25 @@ async function generateRoutine() {
         if (G.editMode && G.editData) {
             // Update
             await db.from('routines').update({
-                name, personal_target: target,
-                start_date: startStr, end_date: endStr,
-                start_time: startTime, end_time: endTime,
+                name, 
+                personal_target: target,
+                start_date: startStr, 
+                end_date: endStr,
+                start_time: startTime, 
+                end_time: endTime,
                 revision_gap: revGap,
-                total_days: totalDays, study_days: studyDays, revision_days: revisionDays,
-                total_chapters: totalChaps, total_topics: totalTopics,
+                total_days: totalDays, 
+                study_days: studyDays, 
+                revision_days: revisionDays,
+                total_chapters: totalChaps, 
+                total_topics: totalTopics,
                 updated_at: new Date().toISOString()
             }).eq('id', G.editData.id);
 
             routineId = G.editData.id;
 
-            // Save history before wiping
             await saveHistory(routineId, 'edit', G.editData.total_topics, totalTopics, totalTopics, 'Edited and regenerated');
 
-            // Wipe old
             await db.from('routine_items').delete().eq('routine_id', routineId);
             await db.from('topics').delete().eq('routine_id', routineId);
             await db.from('chapters').delete().eq('routine_id', routineId);
@@ -335,15 +364,29 @@ async function generateRoutine() {
         } else {
             // Insert new
             const { data, error } = await db.from('routines').insert({
-                user_id: G.userId, name, personal_target: target,
-                start_date: startStr, end_date: endStr,
-                start_time: startTime, end_time: endTime,
-                revision_gap: revGap, routine_type: 'big_plan',
-                total_days: totalDays, study_days: studyDays, revision_days: revisionDays,
-                total_chapters: totalChaps, total_topics: totalTopics,
-                chapters_done: 0, topics_done: 0, is_completed: false
+                user_id: G.userId,
+                name, 
+                personal_target: target,
+                start_date: startStr, 
+                end_date: endStr,
+                start_time: startTime, 
+                end_time: endTime,
+                revision_gap: revGap, 
+                routine_type: 'big_plan',
+                total_days: totalDays, 
+                study_days: studyDays, 
+                revision_days: revisionDays,
+                total_chapters: totalChaps, 
+                total_topics: totalTopics,
+                chapters_done: 0, 
+                topics_done: 0, 
+                is_completed: false
             }).select().single();
-            if (error) throw error;
+            
+            if (error) {
+                console.error('Insert error:', error);
+                throw error;
+            }
             routineId = data.id;
         }
 
@@ -383,7 +426,6 @@ async function generateRoutine() {
                     sort_order: sortIdx++
                 });
             } else if (day.topics.length === 0) {
-                // Empty study day → insert ❌ row
                 await db.from('routine_items').insert({
                     routine_id: routineId,
                     date: fmtDateISO(day.date),
@@ -419,7 +461,7 @@ async function generateRoutine() {
 
     } catch (err) {
         hideLoader();
-        console.error(err);
+        console.error('Generation error:', err);
         alert('ত্রুটি: ' + err.message);
     }
 }
@@ -428,17 +470,13 @@ async function generateRoutine() {
 // CORE AI DISTRIBUTION ALGORITHM
 // ══════════════════════════════════════
 function distributeTopics(chapGroups, startDate, totalDays, revGap, studyDays) {
-    // Step 1: Calculate total effective time
     const totalTime = chapGroups.reduce((s, g) => s + g.topics.reduce((ss, t) => ss + t.effectiveTime, 0), 0);
     const dailyTarget = studyDays > 0 ? totalTime / studyDays : totalTime;
 
-    // Step 2: Sort for mental balance — interleave Hard with Easy
-    // Strategy: sort Hard, then alternate Hard/Easy/Medium groups
     const hard   = chapGroups.filter(g => g.difficulty === 'hard');
     const medium = chapGroups.filter(g => g.difficulty === 'medium');
     const easy   = chapGroups.filter(g => g.difficulty === 'easy');
 
-    // Interleave: H, E, M, H, E, M ...
     const ordered = [];
     const maxLen = Math.max(hard.length, medium.length, easy.length);
     for (let i = 0; i < maxLen; i++) {
@@ -447,14 +485,12 @@ function distributeTopics(chapGroups, startDate, totalDays, revGap, studyDays) {
         if (i < medium.length) ordered.push(medium[i]);
     }
 
-    // Step 3: Build day-by-day schedule
     const schedule = [];
     let dayNum = 1;
     let date = new Date(startDate);
     let groupIdx = 0;
 
     while (dayNum <= totalDays) {
-        // Revision day: every revGap-th day (day 7, 14, 21... when revGap=7)
         if (dayNum > 1 && (dayNum - 1) % revGap === 0) {
             schedule.push({ date: new Date(date), dayNum, isRevision: true, topics: [] });
         } else {
@@ -462,27 +498,21 @@ function distributeTopics(chapGroups, startDate, totalDays, revGap, studyDays) {
             let dayTime = 0;
             let hardOnDay = 0;
 
-            // Fill this study day
-            // Keep chapter topics together — take one full chapter group at a time
             let tempIdx = groupIdx;
             while (tempIdx < ordered.length) {
                 const group = ordered[tempIdx];
                 const groupTime = group.topics.reduce((s, t) => s + t.effectiveTime, 0);
                 const topicCount = group.topics.length;
 
-                // Enforce: max 2 hard chapters per day
                 if (group.difficulty === 'hard' && hardOnDay >= 2) {
                     tempIdx++;
                     continue;
                 }
 
-                // Enforce: max 4 topics per day (chapter must fit whole)
                 if (dayTopics.length + topicCount > 4) {
-                    // If day is still empty, take it anyway (chapter has >4 topics)
                     if (dayTopics.length > 0) break;
                 }
 
-                // Add whole chapter group to this day
                 const enriched = group.topics.map(t => ({
                     ...t,
                     subject: group.subject,
@@ -495,7 +525,6 @@ function distributeTopics(chapGroups, startDate, totalDays, revGap, studyDays) {
                 if (group.difficulty === 'hard') hardOnDay++;
                 groupIdx = ++tempIdx;
 
-                // Stop if daily target reached (within ±15%)
                 if (dayTime >= dailyTarget * 0.85) break;
             }
 
@@ -513,19 +542,30 @@ function distributeTopics(chapGroups, startDate, totalDays, revGap, studyDays) {
 // HOME PAGE
 // ══════════════════════════════════════
 async function loadHome() {
-    const { data, error } = await db.from('routines')
-        .select('*')
-        .eq('user_id', G.userId)
-        .order('created_at', { ascending: false });
+    try {
+        const { data, error } = await db.from('routines')
+            .select('*')
+            .eq('user_id', G.userId)
+            .order('created_at', { ascending: false });
 
-    const container = document.getElementById('savedRoutines');
-    if (error || !data?.length) {
-        container.innerHTML = '<p style="text-align:center;opacity:.5;padding:40px 20px;">কোনো রুটিন নেই। নতুন রুটিন তৈরি করুন!</p>';
-        return;
+        const container = document.getElementById('savedRoutines');
+        
+        if (error) {
+            console.error('Load home error:', error);
+            container.innerHTML = '<p style="text-align:center;opacity:.5;padding:40px 20px;">লোড করতে সমস্যা হয়েছে</p>';
+            return;
+        }
+
+        if (!data || data.length === 0) {
+            container.innerHTML = '<p style="text-align:center;opacity:.5;padding:40px 20px;">কোনো রুটিন নেই। নতুন রুটিন তৈরি করুন!</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+        data.forEach(r => container.appendChild(buildRoutineCard(r)));
+    } catch (err) {
+        console.error('Load home exception:', err);
     }
-
-    container.innerHTML = '';
-    data.forEach(r => container.appendChild(buildRoutineCard(r)));
 }
 
 function buildRoutineCard(r) {
@@ -568,7 +608,6 @@ async function openView(id) {
 
     G.currentRoutine = r;
 
-    // Screen header
     document.getElementById('viewRoutineName').textContent = r.name;
     document.getElementById('viewDateRange').textContent   = `📅 ${fmtDate(r.start_date)} → ${fmtDate(r.end_date)} | মোট ${r.total_days} দিন`;
 
@@ -580,7 +619,6 @@ async function openView(id) {
     document.getElementById('viewTarget').textContent = r.personal_target
         ? `🎯 ${r.personal_target}` : '';
 
-    // PDF header
     document.getElementById('pdfTitle').textContent  = r.name;
     document.getElementById('pdfDate').textContent   = `তারিখ: ${fmtDate(r.start_date)} → ${fmtDate(r.end_date)}`;
     document.getElementById('pdfTarget').textContent = r.personal_target ? `লক্ষ্য: ${r.personal_target}` : '';
@@ -596,14 +634,6 @@ async function openView(id) {
 function renderTable(items, r) {
     const tbody = document.getElementById('routineTbody');
     tbody.innerHTML = '';
-
-    // Group items by date for display
-    const byDate = {};
-    items.forEach(item => {
-        const d = item.date;
-        if (!byDate[d]) byDate[d] = [];
-        byDate[d].push(item);
-    });
 
     items.forEach(item => {
         const tr = document.createElement('tr');
@@ -656,13 +686,11 @@ function refreshProgress(r) {
 }
 
 // ══════════════════════════════════════
-// CHECKBOX LOGIC (Syncs routine_items + chapters + topics)
+// CHECKBOX LOGIC
 // ══════════════════════════════════════
 async function onTopicCb(itemId, chapName, isDone) {
-    // 1. Update this topic_done
     await db.from('routine_items').update({ topic_done: isDone }).eq('id', itemId);
 
-    // 2. Update topics table
     const { data: item } = await db.from('routine_items').select('topic_name').eq('id', itemId).single();
     if (item?.topic_name && item.topic_name !== '❌') {
         await db.from('topics')
@@ -671,7 +699,6 @@ async function onTopicCb(itemId, chapName, isDone) {
             .eq('name', item.topic_name);
     }
 
-    // 3. Check if ALL topics of this chapter are now done → auto-check chapter
     const { data: chapItems } = await db.from('routine_items')
         .select('topic_done, is_revision')
         .eq('routine_id', G.routineId)
@@ -691,7 +718,6 @@ async function onTopicCb(itemId, chapName, isDone) {
             .eq('routine_id', G.routineId)
             .eq('name', chapName);
     } else {
-        // If un-checking, un-check chapter too
         if (!isDone) {
             await db.from('routine_items')
                 .update({ chapter_done: false })
@@ -709,19 +735,16 @@ async function onTopicCb(itemId, chapName, isDone) {
 }
 
 async function onChapterCb(itemId, chapName, isDone) {
-    // Check/uncheck ALL topics + chapter for this chapter name
     await db.from('routine_items')
         .update({ chapter_done: isDone, topic_done: isDone })
         .eq('routine_id', G.routineId)
         .eq('chapter_name', chapName);
 
-    // Update chapters table
     await db.from('chapters')
         .update({ is_done: isDone })
         .eq('routine_id', G.routineId)
         .eq('name', chapName);
 
-    // Update topics table (via chapter_id)
     const { data: chData } = await db.from('chapters')
         .select('id')
         .eq('routine_id', G.routineId)
@@ -743,7 +766,6 @@ async function syncProgressToDB() {
         .eq('routine_id', G.routineId)
         .eq('is_revision', false);
 
-    // Count unique chapters done
     const chapMap = {};
     items?.forEach(i => {
         if (!i.chapter_name || i.chapter_name === '❌') return;
@@ -753,7 +775,6 @@ async function syncProgressToDB() {
     });
     const chaptersDone = Object.values(chapMap).filter(v => v.total > 0 && v.done === v.total).length;
 
-    // Count topics done
     const validTopics = items?.filter(i => i.topic_name && i.topic_name !== '❌') || [];
     const topicsDone  = validTopics.filter(i => i.topic_done).length;
 
@@ -763,7 +784,6 @@ async function syncProgressToDB() {
         updated_at:    new Date().toISOString()
     }).eq('id', G.routineId);
 
-    // Update local cache for progress bars
     if (G.currentRoutine) {
         G.currentRoutine.chapters_done = chaptersDone;
         G.currentRoutine.topics_done   = topicsDone;
@@ -806,7 +826,6 @@ async function remakeRoutine() {
     const revisionDays = Math.floor((totalDays - 1) / revGap);
     const studyDays    = Math.max(1, totalDays - revisionDays);
 
-    // Re-group pending topics by chapter
     const chapMap = {};
     pending.forEach(item => {
         const key = `${item.subject_name}|||${item.chapter_name}`;
@@ -817,13 +836,10 @@ async function remakeRoutine() {
 
     showLoader('রুটিন পুনরায় তৈরি হচ্ছে...');
 
-    // Save history
     await saveHistory(G.routineId, 'remake', r.total_topics, pending.length, pending.length, 'Remade with pending topics');
 
-    // Delete old items
     await db.from('routine_items').delete().eq('routine_id', G.routineId);
 
-    // Redistribute
     const schedule = distributeTopics(chapGroups, startDate, totalDays, revGap, studyDays);
 
     let sortIdx = 0;
@@ -854,7 +870,6 @@ async function remakeRoutine() {
         }
     }
 
-    // Update routine start date & counts
     await db.from('routines').update({
         start_date: fmtDateISO(startDate),
         total_days: totalDays, study_days: studyDays, revision_days: revisionDays,
@@ -886,7 +901,6 @@ async function editRoutine() {
 
     resetCreator();
 
-    // Fill step 1
     document.getElementById('routineName').value = r.name;
     document.getElementById('personalTarget').value = r.personal_target || '';
     document.getElementById('startDate').value = r.start_date?.split('T')[0] || '';
@@ -898,7 +912,6 @@ async function editRoutine() {
 
     calcDays();
 
-    // Re-build subjects
     for (const subj of subjects) {
         G.subCount++;
         const sid = G.subCount;
@@ -950,7 +963,7 @@ async function deleteRoutine(id) {
 }
 
 // ══════════════════════════════════════
-// PDF DOWNLOAD
+// PDF
 // ══════════════════════════════════════
 async function pdfRoutine(id) {
     G.routineId = id;
@@ -963,10 +976,9 @@ function downloadPDF() {
 }
 
 // ══════════════════════════════════════
-// ROUTINE HISTORY
+// HISTORY
 // ══════════════════════════════════════
 async function saveHistory(routineId, action, topBefore, topAfter, pending, notes) {
-    // Get current version
     const { data: hist } = await db.from('routine_history')
         .select('version')
         .eq('routine_id', routineId)
@@ -995,7 +1007,7 @@ function hideLoader() {
 }
 
 // ══════════════════════════════════════
-// RESET CREATOR
+// RESET
 // ══════════════════════════════════════
 function resetCreator() {
     G.subCount = 0; G.chapCount = 0; G.topicCount = 0;
